@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Build the modern WASD key preset from the classic keys file the game writes for a new profile.
+
+  python3 -I src/keys/make_preset.py   -> src/keys/presets/keys.modern + src/keys/modern_keys.inc
+
+The layout is the table below (layout version 3). One line per changed
+binding: (group, action, classic value, modern value). The script checks that every classic value
+is exactly what the classic file holds, so a typo cannot slip through. Everything not listed stays.
+"""
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+LAYOUT = [
+    # group            action                   classic                      modern
+    ('control_camera', 'scroll_forward',        'KEY_NUMPAD8',               'KEY_W'),
+    ('control_camera', 'scroll_backward',       'KEY_NUMPAD5',               'KEY_S'),
+    ('control_camera', 'scroll_left',           'KEY_NUMPAD4',               'KEY_A'),
+    ('control_camera', 'scroll_right',          'KEY_NUMPAD6',               'KEY_D'),
+    ('actions',        'cancel',                'KEY_S',                     'KEY_C'),
+    ('actions',        'attack',                'KEY_A',                     'KEY_T'),
+    ('control_human',  'select_secondary',      'KEY_W',                     'KEY_E'),
+    ('actions',        'rotate',                'KEY_R',                     'KEY_V'),
+    ('common',         'center_active',         'KEY_C',                     'KEY_Z'),
+    ('actions',        'emit',                  'KEY_E',                     'KEY_B'),
+    ('actions',        'drop',                  'KEY_D',                     'KEY_N'),
+    ('multiplayer',    'chat_team',             'KEY_T',                     'KEY_K'),
+    ('common',         'toggle_autotargetting', '~DOUBLE + SHIFT + KEY_A',   '~DOUBLE + SHIFT + KEY_T'),
+    # layout v2: reload on R
+    ('common',         'weapon_reload',         'KEY_ADD',                   'KEY_R'),
+    ('common',         'corpses_highlight',     'KEY_V',                     'KEY_L'),
+    # layout v3: direct control moves the unit with W/S/A/D as well. Proven in
+    # the game: under direct control W/S/A/D move the unit and the camera only follows it; without direct
+    # control they scroll the camera. The arrow keys are no longer bound (one key per action).
+    ('control_manual', 'forward',               'KEY_UP',                    'KEY_W'),
+    ('control_manual', 'backward',              'KEY_DOWN',                  'KEY_S'),
+    ('control_manual', 'left',                  'KEY_LEFT',                  'KEY_A'),
+    ('control_manual', 'right',                 'KEY_RIGHT',                 'KEY_D'),
+]
+# keys deliberately bound twice: camera scroll (control_camera) and direct control (control_manual)
+DOUBLE_DUTY = {'KEY_W', 'KEY_S', 'KEY_A', 'KEY_D'}
+
+
+def convert(text):
+    lines = text.split('\r\n')
+    group = None
+    depth = 0
+    done = set()
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if depth == 1 and s.startswith('{') and '"' not in s:
+            group = s[1:].strip()
+        for g, act, old, new in LAYOUT:
+            if g == group and s.startswith('{%s "' % act):
+                want = '{%s "%s"' % (act, old)
+                assert s.startswith(want), (g, act, s)
+                lines[i] = ln.replace(want, '{%s "%s"' % (act, new), 1)
+                done.add((g, act))
+        depth += s.count('{') - s.count('}')
+    missing = [(g, a) for g, a, _, _ in LAYOUT if (g, a) not in done]
+    assert not missing, missing
+    return '\r\n'.join(lines)
+
+
+def c_literal(b):
+    out, line = [], ''
+    for ch in b.decode('ascii'):
+        e = {'\r': '\\r', '\n': '\\n', '\t': '\\t', '"': '\\"', '\\': '\\\\'}.get(ch, ch)
+        line += e
+        if ch == '\n':
+            out.append('"%s"' % line)
+            line = ''
+    if line:
+        out.append('"%s"' % line)
+    return '\n'.join(out)
+
+
+def main():
+    classic = open(os.path.join(HERE, 'presets', 'keys.classic'), 'rb').read()
+    modern = convert(classic.decode('ascii')).encode('ascii')
+    # the new values must not collide with any other plain binding of the same key (W/S/A/D: exactly the
+    # camera row and the direct-control row)
+    for _, _, _, new in LAYOUT:
+        n = modern.count(('"%s"' % new).encode())
+        assert n == (2 if new in DOUBLE_DUTY else 1), (new, n)
+    # stricter check: each double-duty key sits on exactly its direct-control and its camera row
+    for key, pair in (('KEY_W', ('forward', 'scroll_forward')), ('KEY_S', ('backward', 'scroll_backward')),
+                      ('KEY_A', ('left', 'scroll_left')), ('KEY_D', ('right', 'scroll_right'))):
+        found = sorted(l.split()[0].lstrip('{') for l in modern.decode().splitlines() if '"%s"' % key in l)
+        assert found == sorted(pair), (key, found)
+    open(os.path.join(HERE, 'presets', 'keys.modern'), 'wb').write(modern)
+    with open(os.path.join(HERE, 'modern_keys.inc'), 'w') as f:
+        f.write('// generated by src/keys/make_preset.py from presets/keys.classic; do not edit\n')
+        f.write('static const char k_classic_keys[] =\n%s;\n' % c_literal(classic))
+        f.write('static const char k_modern_keys[] =\n%s;\n' % c_literal(modern))
+    print('keys.modern: %d bytes (classic %d)' % (len(modern), len(classic)))
+
+
+if __name__ == '__main__':
+    main()

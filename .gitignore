@@ -1,0 +1,36 @@
+# build output (src/ee/build.sh)
+/build/
+*.o
+*.dll
+*.exe
+
+# Python caches
+__pycache__/
+*.pyc
+
+# game data, never part of this repository
+*.raw
+*.pak
+*.pat
+*.fbin
+/uiscale_hd/
+*.bin
+*.tga
+*.bmp
+*.png
+*.jpg
+*.wma
+*.wmv
+*.mod
+
+# editor and backup files
+*.orig
+*.rej
+*.bak
+*~
+
+# helper binary built from tools/xbrz3.cpp
+/tools/xbrz3
+
+# the release zips and their inputs (tools/build_patch.sh): local only, never pushed
+/disc/
